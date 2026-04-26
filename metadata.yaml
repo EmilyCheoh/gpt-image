@@ -1,5 +1,5 @@
 name: astrbot_plugin_gpt_image
-desc: "画画！"
-author: Felis Abyssalis modifying code from Kai
+desc: "GPT Image plugin — OpenAI images API / chat completions"
+author: Kai & Abyss AI
 repo: "https://github.com/EmilyCheoh/gpt-image"
-version: 1.2.0
+version: 1.2.1
