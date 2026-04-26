@@ -1,0 +1,27 @@
+{
+  "api_key": {
+    "description": "画图 API 的密钥（例如 tu-zi 的 API Key）",
+    "type": "string",
+    "default": ""
+  },
+  "api_base": {
+    "description": "画图 API 的基础地址",
+    "type": "string",
+    "default": "https://api.tu-zi.com/v1"
+  },
+  "model": {
+    "description": "画图模型名称",
+    "type": "string",
+    "default": "gpt-image-2"
+  },
+  "api_format": {
+    "description": "API 格式：images（标准 /images/generations）、chat（/chat/completions 返回图片链接）、auto（自动尝试，先 images 再 chat，可能更慢）",
+    "type": "string",
+    "default": "images"
+  },
+  "timeout": {
+    "description": "画图请求超时时间（秒）",
+    "type": "int",
+    "default": 240
+  }
+}
