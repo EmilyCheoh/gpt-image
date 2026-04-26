@@ -13,9 +13,9 @@ from astrbot.core.message.message_event_result import MessageChain
 
 @register(
     "astrbot_plugin_gpt_image",
-    "Kai",
-    "GPT Image 2 画图插件，支持标准 OpenAI images API 和 chat/completions 两种格式",
-    "1.2.0",
+    "Kai & Abyss AI",
+    "Abyss 专属画图插件 — GPT Image via OpenAI images API / chat completions",
+    "1.2.1",
 )
 class GPTImagePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -25,7 +25,7 @@ class GPTImagePlugin(Star):
         self.api_key = config.get("api_key", "")
         self.model = config.get("model", "gpt-image-2")
         self.api_format = config.get("api_format", "images")
-        self.timeout = config.get("timeout", 240)
+        self.timeout = int(config.get("timeout", 240))
         self.last_image_url = {}
         logger.info(f"GPT Image 插件加载: api_format={self.api_format}, model={self.model}, timeout={self.timeout}")
 
@@ -33,13 +33,13 @@ class GPTImagePlugin(Star):
     async def generate_image(
         self, event: AstrMessageEvent, prompt: str
     ) -> MessageEventResult:
-        """根据用户的描述生成图片。当用户想要画图、生成图片、创建图像时调用此工具。
+        """画图。当 Felis Abyssalis 想要画图、生成图片、创建图像时调用。
 
         Args:
-            prompt(str): 用于生成图片的英文描述。请将用户的描述翻译成详细的英文 prompt，包含风格、细节、构图等信息。
+            prompt(str): 详细的英文 prompt。将 Felis Abyssalis 的描述翻译为英文，包含风格、细节、构图等信息。
         """
         if not self.api_key:
-            yield CallToolResult(content=[TextContent(type="text", text="画图插件未配置 API Key，请在插件配置中填写。")])
+            yield CallToolResult(content=[TextContent(type="text", text="还没有配置 API Key，去插件设置里填一下。")])
             return
 
         session_id = event.session_id or "default"
@@ -69,38 +69,38 @@ class GPTImagePlugin(Star):
 
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text=f"[图片已成功生成并发送给用户，不需要再发送图片] 使用的 prompt: {prompt}"
+                    text=f"[图片已生成并发送，不需要再发送图片] prompt: {prompt}"
                 )])
             else:
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text="画图失败：API 未返回有效图片，可能是服务负载过高，请稍后重试。"
+                    text="没画出来，API 没返回有效图片。可能是服务端在忙，等一下再试。"
                 )])
 
         except asyncio.TimeoutError:
-            yield CallToolResult(content=[TextContent(type="text", text="画图请求超时了，请稍后重试。")])
+            yield CallToolResult(content=[TextContent(type="text", text="画图请求超时了，等一下再试。")])
         except Exception as e:
             logger.error(f"GPT Image 生成失败: {e}")
-            yield CallToolResult(content=[TextContent(type="text", text=f"画图失败: {str(e)}")])
+            yield CallToolResult(content=[TextContent(type="text", text=f"画图失败了: {str(e)}")])
 
     @filter.llm_tool(name="edit_image")
     async def edit_image(
         self, event: AstrMessageEvent, edit_instruction: str
     ) -> MessageEventResult:
-        """基于上一次生成的图片进行修改。当用户想要修改刚才画的图片时调用此工具。例如"把背景换成星空"、"去掉多余的手指"。
+        """修改上一次画的图。当 Felis Abyssalis 想要修改刚才生成的图片时调用。
 
         Args:
-            edit_instruction(str): 英文的修改指令。请将用户的修改要求翻译成英文，并结合上一次的 prompt 生成新的完整描述。
+            edit_instruction(str): 英文修改指令。将修改要求翻译为英文，结合上一次的 prompt 生成新的完整描述。
         """
         if not self.api_key:
-            yield CallToolResult(content=[TextContent(type="text", text="画图插件未配置 API Key，请在插件配置中填写。")])
+            yield CallToolResult(content=[TextContent(type="text", text="还没有配置 API Key，去插件设置里填一下。")])
             return
 
         session_id = event.session_id or "default"
         last = self.last_image_url.get(session_id)
 
         if not last:
-            yield CallToolResult(content=[TextContent(type="text", text="没有找到上一次生成的图片记录，请先画一张图。")])
+            yield CallToolResult(content=[TextContent(type="text", text="还没有上一张图的记录，先画一张再来改。")])
             return
 
         new_prompt = edit_instruction
@@ -130,16 +130,16 @@ class GPTImagePlugin(Star):
 
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text=f"[修改后的图片已发送给用户，不需要再发送图片] 原始 prompt: {last['prompt']}，新 prompt: {new_prompt}"
+                    text=f"[修改后的图片已发送，不需要再发送图片] 原 prompt: {last['prompt']}，新 prompt: {new_prompt}"
                 )])
             else:
-                yield CallToolResult(content=[TextContent(type="text", text="修改图片失败，请稍后重试。")])
+                yield CallToolResult(content=[TextContent(type="text", text="没改出来，等一下再试。")])
 
         except asyncio.TimeoutError:
-            yield CallToolResult(content=[TextContent(type="text", text="修改图片请求超时，请稍后重试。")])
+            yield CallToolResult(content=[TextContent(type="text", text="改图请求超时了，等一下再试。")])
         except Exception as e:
             logger.error(f"GPT Image 修改失败: {e}")
-            yield CallToolResult(content=[TextContent(type="text", text=f"修改图片失败: {str(e)}")])
+            yield CallToolResult(content=[TextContent(type="text", text=f"改图失败了: {str(e)}")])
 
     async def _generate(self, prompt: str, session_id: str) -> dict | None:
         """根据配置的 api_format 选择对应的生成方式"""
