@@ -1,5 +1,5 @@
 name: astrbot_plugin_gpt_image
-desc: "GPT Image 2 画图插件，支持标准 OpenAI images API 和 chat/completions 两种格式"
-author: Kai
+desc: "画画！"
+author: Felis Abyssalis modifying code from Kai
 repo: "https://github.com/EmilyCheoh/gpt-image"
 version: 1.2.0
