@@ -27,7 +27,7 @@ class GPTImagePlugin(Star):
         self.api_format = config.get("api_format", "images")
         self.timeout = int(config.get("timeout", 240))
         self.last_image_url = {}
-        logger.info(f"GPT Image loaded: api_format={self.api_format}, model={self.model}, timeout={self.timeout}")
+        logger.info(f"[画图工具已加载] api_format: {self.api_format} / model: {self.model} / timeout: {self.timeout}s")
 
     @filter.llm_tool(name="generate_image")
     async def generate_image(
@@ -43,7 +43,7 @@ class GPTImagePlugin(Star):
             return
 
         session_id = event.session_id or "default"
-        logger.info(f"GPT Image generate (format={self.api_format}): {prompt}")
+        logger.info(f"[画图] Abyss 准备画一张: {prompt}")
 
         try:
             result = await self._generate(prompt, session_id)
@@ -60,12 +60,12 @@ class GPTImagePlugin(Star):
                         msg_chain = MessageChain(chain=[Image.fromURL(image_url)])
                         await event.send(msg_chain)
                 except Exception as send_err:
-                    logger.warning(f"Image send may have timed out (image might still have been sent): {send_err}")
+                    logger.warning(f"[画图] 图发出去的时候好像卡了一下，但也许已经到了: {send_err}")
 
                 try:
                     await event.send(MessageChain(chain=[Plain(f"Prompt: {prompt}")]))
                 except Exception as send_err:
-                    logger.warning(f"Prompt send failed: {send_err}")
+                    logger.warning(f"[画图] prompt 没能发出去: {send_err}")
 
                 yield CallToolResult(content=[TextContent(
                     type="text",
@@ -80,7 +80,7 @@ class GPTImagePlugin(Star):
         except asyncio.TimeoutError:
             yield CallToolResult(content=[TextContent(type="text", text="Generation timed out. Try again later.")])
         except Exception as e:
-            logger.error(f"GPT Image generate failed: {e}")
+            logger.error(f"[画图] LLM 生图失败: {e}")
             yield CallToolResult(content=[TextContent(type="text", text=f"Generation failed: {str(e)}")])
 
     @filter.command("image_gen")
@@ -112,10 +112,10 @@ class GPTImagePlugin(Star):
 
         try:
             if source_image_url:
-                logger.info(f"GPT Image edit command: {prompt} | source: {source_image_url}")
+                logger.info(f"[画图] /image_gen 小猫要改图 | prompt: {prompt}")
                 result = await self._edit(prompt, source_image_url, session_id)
             else:
-                logger.info(f"GPT Image generate command: {prompt}")
+                logger.info(f"[画图] /image_gen 小猫要画画 | prompt: {prompt}")
                 result = await self._generate(prompt, session_id)
 
             if result:
@@ -132,7 +132,7 @@ class GPTImagePlugin(Star):
         except asyncio.TimeoutError:
             yield event.plain_result("Generation timed out. Try again later.")
         except Exception as e:
-            logger.error(f"GPT Image command failed: {e}")
+            logger.error(f"[画图] /image_gen 失败，小猫的画没画成: {e}")
             yield event.plain_result(f"Generation failed: {str(e)}")
 
     async def _edit(self, prompt: str, image_url: str, session_id: str) -> dict | None:
@@ -140,7 +140,7 @@ class GPTImagePlugin(Star):
         # Download the source image first
         image_bytes = await self._download_image_bytes(image_url)
         if not image_bytes:
-            logger.error("Failed to download source image for editing")
+            logger.error("[画图] 原图下载失败，没法帮小猫改图")
             return None
 
         return await self._try_images_edit_api(prompt, image_bytes, session_id)
@@ -155,10 +155,10 @@ class GPTImagePlugin(Star):
                     if resp.status == 200:
                         return await resp.read()
                     else:
-                        logger.error(f"Image download failed ({resp.status}): {url}")
+                        logger.error(f"[画图] 原图下载失败 (HTTP {resp.status})")
                         return None
         except Exception as e:
-            logger.error(f"Image download error: {e}")
+            logger.error(f"[画图] 原图下载出错: {e}")
             return None
 
     async def _try_images_edit_api(self, prompt: str, image_bytes: bytes, session_id: str) -> dict | None:
@@ -183,12 +183,12 @@ class GPTImagePlugin(Star):
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.warning(f"images edit API failed ({resp.status}): {text[:200]}")
+                        logger.warning(f"[画图] 改图 API 返回错误 (HTTP {resp.status}): {text[:200]}")
                         return None
 
                     data = await resp.json()
 
-            logger.info(f"images edit API response: {str(data)[:300]}")
+            logger.info(f"[画图] 图改好了 | 数据预览: {str(data)[:300]}")
 
             items = data.get("data", [])
             if not items:
@@ -210,7 +210,7 @@ class GPTImagePlugin(Star):
         except asyncio.TimeoutError:
             raise
         except Exception as e:
-            logger.warning(f"images edit API error: {e}")
+            logger.warning(f"[画图] 改图 API 出错了: {e}")
             return None
 
     async def _generate(self, prompt: str, session_id: str) -> dict | None:
@@ -226,7 +226,7 @@ class GPTImagePlugin(Star):
             result = await self._try_images_api(prompt, session_id, quick_timeout=15)
             if result:
                 return result
-            logger.info("images API quick probe failed, falling back to chat API")
+            logger.info("[画图] images 接口探测失败，切换到 chat 接口试一下")
             return await self._try_chat_api(prompt, session_id)
 
     async def _try_images_api(self, prompt: str, session_id: str, quick_timeout: int = 0) -> dict | None:
@@ -253,12 +253,12 @@ class GPTImagePlugin(Star):
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.warning(f"images API failed ({resp.status}): {text[:200]}")
+                        logger.warning(f"[画图] 生图 API 返回错误 (HTTP {resp.status}): {text[:200]}")
                         return None
 
                     data = await resp.json()
 
-            logger.info(f"images API response: {str(data)[:300]}")
+            logger.info(f"[画图] 画好了 | 数据预览: {str(data)[:300]}")
 
             items = data.get("data", [])
             if not items:
@@ -281,11 +281,11 @@ class GPTImagePlugin(Star):
             return None
         except asyncio.TimeoutError:
             if quick_timeout > 0:
-                logger.info(f"images API quick probe timed out ({quick_timeout}s), trying other format")
+                logger.info(f"[画图] images 接口探测超时 ({quick_timeout}s)，切换到其他模式")
                 return None
             raise
         except Exception as e:
-            logger.warning(f"images API error: {e}")
+            logger.warning(f"[画图] 生图 API 出错了: {e}")
             return None
 
     async def _try_chat_api(self, prompt: str, session_id: str) -> dict | None:
@@ -308,16 +308,16 @@ class GPTImagePlugin(Star):
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.warning(f"chat API failed ({resp.status}): {text[:200]}")
+                        logger.warning(f"[画图] chat 接口返回错误 (HTTP {resp.status}): {text[:200]}")
                         return None
 
                     data = await resp.json()
 
             content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            logger.info(f"chat API response content: {content[:300]}")
+            logger.info(f"[画图] chat 接口返回成功了 | 内容预览: {content[:300]}")
 
             if "失败" in content or "error" in content.lower():
-                logger.error(f"chat API returned error: {content}")
+                logger.error(f"[画图] chat 接口返回了错误内容，说画不了: {content}")
                 return None
 
             image_url = self._extract_url_from_content(content)
@@ -330,7 +330,7 @@ class GPTImagePlugin(Star):
         except asyncio.TimeoutError:
             raise
         except Exception as e:
-            logger.warning(f"chat API error: {e}")
+            logger.warning(f"[画图] chat 接口出错了: {e}")
             return None
 
     def _extract_url_from_content(self, content: str) -> str | None:
@@ -357,7 +357,7 @@ class GPTImagePlugin(Star):
                 f.write(base64.b64decode(b64_data))
             return file_path
         except Exception as e:
-            logger.error(f"Failed to save b64 image: {e}")
+            logger.error(f"[画图] base64 图片保存到本地失败了: {e}")
             return None
 
     async def _download_image(self, url: str, session_id: str) -> str | None:
@@ -384,10 +384,10 @@ class GPTImagePlugin(Star):
                             f.write(await resp.read())
                         return file_path
                     else:
-                        logger.error(f"Image download failed ({resp.status}): {url}")
+                        logger.error(f"[画图] 画好了，但是下载失败 (HTTP {resp.status})")
                         return None
         except Exception as e:
-            logger.error(f"Image download error: {e}")
+            logger.error(f"[画图] 拿成品图的时候出了点问题: {e}")
             return None
 
     async def terminate(self):
