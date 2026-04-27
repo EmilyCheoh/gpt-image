@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0
+
+- Added image-to-image editing to `/image_gen` — attach an image with the command to edit it via `/v1/images/edits`
+- Text-only `/image_gen {prompt}` still works as before (text-to-image)
+
 ## 1.2.1
 
 - Added `/image_gen {prompt}` direct command — bypasses LLM, sends prompt straight to the image API

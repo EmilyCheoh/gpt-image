@@ -5,7 +5,7 @@ GPT Image plugin for AstrBot — generates images via OpenAI-compatible API endp
 ## Features
 
 - **LLM tool** (`generate_image`): LLM automatically calls this when Felis Abyssalis asks to draw/generate an image. Translates the request into a detailed English prompt.
-- **Direct command** (`/image_gen {prompt}`): Bypasses LLM entirely. Send the prompt wrapped in `{}` to generate an image directly.
+- **Direct command** (`/image_gen {prompt}`): Bypasses LLM entirely. Send the prompt wrapped in `{}` to generate an image directly. Attach an image in the same message to edit it (image-to-image).
 - Supports two API formats:
   - `images` — standard `/v1/images/generations` endpoint
   - `chat` — `/v1/chat/completions` endpoint (extracts image URL from response)
@@ -19,6 +19,12 @@ Just ask Abyss AI to draw something in conversation. The LLM decides when to cal
 ### Via command (manual)
 ```
 /image_gen {a beautiful cat sitting on the moon at midnight}
+```
+
+### Image-to-image editing
+Attach an image in the same message as the command to edit it:
+```
+/image_gen {make the background a sunset} [attached image]
 ```
 
 ## Configuration

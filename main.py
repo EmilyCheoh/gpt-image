@@ -15,7 +15,7 @@ from astrbot.core.message.message_event_result import MessageChain
     "astrbot_plugin_gpt_image",
     "Kai & Abyss AI",
     "GPT Image plugin — OpenAI images API / chat completions",
-    "1.2.1",
+    "1.3.0",
 )
 class GPTImagePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -85,7 +85,8 @@ class GPTImagePlugin(Star):
 
     @filter.command("image_gen")
     async def image_gen_command(self, event: AstrMessageEvent):
-        """Direct image generation command, bypasses LLM."""
+        """Direct image generation/editing command, bypasses LLM.
+        Send with an image to edit it, or text-only to generate from scratch."""
         if not self.api_key:
             yield event.plain_result("API Key not configured.")
             return
@@ -93,18 +94,29 @@ class GPTImagePlugin(Star):
         raw = (event.message_str or "").strip()
         match = re.search(r"\{(.+?)\}", raw, re.DOTALL)
         if not match:
-            yield event.plain_result("Usage: /image_gen {prompt}")
+            yield event.plain_result("Usage: /image_gen {prompt}\nAttach or reply with an image to edit it.")
             return
         prompt = match.group(1).strip()
         if not prompt:
-            yield event.plain_result("Usage: /image_gen {prompt}")
+            yield event.plain_result("Usage: /image_gen {prompt}\nAttach or reply with an image to edit it.")
             return
 
+        # Check if the message contains an image (image-to-image editing)
+        source_image_url = None
+        for comp in event.message_obj.message:
+            if isinstance(comp, Image) and getattr(comp, "url", None):
+                source_image_url = comp.url
+                break
+
         session_id = event.session_id or "default"
-        logger.info(f"GPT Image command: {prompt}")
 
         try:
-            result = await self._generate(prompt, session_id)
+            if source_image_url:
+                logger.info(f"GPT Image edit command: {prompt} | source: {source_image_url}")
+                result = await self._edit(prompt, source_image_url, session_id)
+            else:
+                logger.info(f"GPT Image generate command: {prompt}")
+                result = await self._generate(prompt, session_id)
 
             if result:
                 local_path = result.get("local_path")
@@ -122,6 +134,84 @@ class GPTImagePlugin(Star):
         except Exception as e:
             logger.error(f"GPT Image command failed: {e}")
             yield event.plain_result(f"Generation failed: {str(e)}")
+
+    async def _edit(self, prompt: str, image_url: str, session_id: str) -> dict | None:
+        """Download source image and send to /v1/images/edits endpoint"""
+        # Download the source image first
+        image_bytes = await self._download_image_bytes(image_url)
+        if not image_bytes:
+            logger.error("Failed to download source image for editing")
+            return None
+
+        return await self._try_images_edit_api(prompt, image_bytes, session_id)
+
+    async def _download_image_bytes(self, url: str) -> bytes | None:
+        """Download an image and return raw bytes"""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=30)
+                ) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                    else:
+                        logger.error(f"Image download failed ({resp.status}): {url}")
+                        return None
+        except Exception as e:
+            logger.error(f"Image download error: {e}")
+            return None
+
+    async def _try_images_edit_api(self, prompt: str, image_bytes: bytes, session_id: str) -> dict | None:
+        """OpenAI /v1/images/edits endpoint (image-to-image)"""
+        url = f"{self.api_base}/images/edits"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        form = aiohttp.FormData()
+        form.add_field("image", image_bytes, filename="source.png", content_type="image/png")
+        form.add_field("prompt", prompt)
+        form.add_field("model", self.model)
+        form.add_field("n", "1")
+        form.add_field("size", "1024x1024")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url, data=form, headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
+                ) as resp:
+                    if resp.status != 200:
+                        text = await resp.text()
+                        logger.warning(f"images edit API failed ({resp.status}): {text[:200]}")
+                        return None
+
+                    data = await resp.json()
+
+            logger.info(f"images edit API response: {str(data)[:300]}")
+
+            items = data.get("data", [])
+            if not items:
+                return None
+
+            item = items[0]
+
+            if "b64_json" in item and item["b64_json"]:
+                local_path = await self._save_b64(item["b64_json"], session_id)
+                if local_path:
+                    return {"local_path": local_path, "url": None}
+
+            if "url" in item and item["url"]:
+                image_url = item["url"]
+                local_path = await self._download_image(image_url, session_id)
+                return {"local_path": local_path, "url": image_url}
+
+            return None
+        except asyncio.TimeoutError:
+            raise
+        except Exception as e:
+            logger.warning(f"images edit API error: {e}")
+            return None
 
     async def _generate(self, prompt: str, session_id: str) -> dict | None:
         """Route to images or chat API based on api_format config"""
