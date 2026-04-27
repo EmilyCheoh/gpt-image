@@ -1,4 +1,5 @@
 name: astrbot_plugin_gpt_image
+display_name: "生成图片"
 desc: "GPT Image plugin — OpenAI images API / chat completions"
 author: Kai & Abyss AI
 repo: "https://github.com/EmilyCheoh/gpt-image"
