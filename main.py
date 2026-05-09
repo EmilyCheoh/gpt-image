@@ -117,11 +117,11 @@ class GPTImagePlugin(Star):
         try:
             if source_image_url:
                 logger.info(f"🎨 /image_gen 小猫要改图 | prompt: {prompt}")
-                await event.send(MessageChain(chain=[Plain(f"🎨 收到，正在改图中... prompt: {prompt}")]))
+                await event.send(MessageChain(chain=[Plain(f"🎨 收到，正在改图中...")]))
                 result = await self._edit(prompt, source_image_url, session_id)
             else:
                 logger.info(f"🎨 /image_gen 小猫要画画 | prompt: {prompt}")
-                await event.send(MessageChain(chain=[Plain(f"🎨 收到，正在画画中... prompt: {prompt}")]))
+                await event.send(MessageChain(chain=[Plain(f"🎨 收到，正在画画中...")]))
                 result = await self._generate(prompt, session_id)
 
             if result:
