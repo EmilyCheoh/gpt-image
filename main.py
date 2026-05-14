@@ -67,7 +67,7 @@ class GPTImagePlugin(Star):
                     logger.warning(f"🎨 图发出去的时候好像卡了一下，但也许已经到了: {send_err}")
 
                 try:
-                    await event.send(MessageChain(chain=[Plain(f"Prompt: {prompt}")]))
+                    await event.send(MessageChain(chain=[Plain(f"Prompt used:\n{prompt}")]))
                 except Exception as send_err:
                     logger.warning(f"🎨 prompt 没能发出去: {send_err}")
 
@@ -78,14 +78,14 @@ class GPTImagePlugin(Star):
             else:
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text=f"Generation failed: API returned no valid image data. Do NOT retry. Send this prompt to Felis Abyssalis for manual generation: {prompt}"
+                    text=f"Generation failed: API returned no valid image data. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
                 )])
 
         except asyncio.TimeoutError:
-            yield CallToolResult(content=[TextContent(type="text", text=f"Generation timed out. Do NOT retry. Send this prompt to Felis Abyssalis for manual generation: {prompt}")])
+            yield CallToolResult(content=[TextContent(type="text", text=f"Generation failed. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}")])
         except Exception as e:
             logger.error(f"🎨 LLM 生图失败: {e}")
-            yield CallToolResult(content=[TextContent(type="text", text=f"Generation failed: {str(e)}. Do NOT retry. Send this prompt to Felis Abyssalis for manual generation: {prompt}")])
+            yield CallToolResult(content=[TextContent(type="text", text=f"Generation failed: {str(e)}. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}")])
 
     @filter.command("image_gen")
     async def image_gen_command(self, event: AstrMessageEvent):
@@ -116,11 +116,11 @@ class GPTImagePlugin(Star):
 
         try:
             if source_image_url:
-                logger.info(f"🎨 /image_gen 小猫要改图 | prompt: {prompt}")
+                logger.info(f"🎨 /image_gen 小猫要改图")
                 await event.send(MessageChain(chain=[Plain(f"🎨 收到，正在改图中...")]))
                 result = await self._edit(prompt, source_image_url, session_id)
             else:
-                logger.info(f"🎨 /image_gen 小猫要画画 | prompt: {prompt}")
+                logger.info(f"🎨 /image_gen 小猫要画画")
                 await event.send(MessageChain(chain=[Plain(f"🎨 收到，正在画画中...")]))
                 result = await self._generate(prompt, session_id)
 
@@ -133,13 +133,13 @@ class GPTImagePlugin(Star):
                 elif image_url:
                     yield event.image_result(image_url)
             else:
-                yield event.plain_result("🎨 Generation failed. Server may be busy, try again later.")
+                yield event.plain_result("🎨 Generation failed.")
 
         except asyncio.TimeoutError:
-            yield event.plain_result(f"🎨 超时了... 小猫可以拿这个 prompt 手动生成: {prompt}")
+            yield event.plain_result(f"🎨 超时了...")
         except Exception as e:
             logger.error(f"🎨 /image_gen 失败，小猫的画没画成: {e}")
-            yield event.plain_result(f"🎨 失败了... 小猫可以拿这个 prompt 手动生成: {prompt}\n错误: {str(e)}")
+            yield event.plain_result(f"🎨 失败了...\n错误: {str(e)}")
 
     async def _edit(self, prompt: str, image_url: str, session_id: str) -> dict | None:
         """Download source image and send to /v1/images/edits endpoint"""
