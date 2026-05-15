@@ -1,5 +1,13 @@
 # Changelog
 
+## May 15 
+
+_generate（文生图）
+
+api_format: "chat" → 先试 chat，挂了自动切 images
+api_format: "images" → 先试 images，挂了自动切 chat
+api_format: "auto" → chat 优先，fallback images
+
 ## 1.3.0
 
 - Added image-to-image editing to `/image_gen` — attach an image with the command to edit it via `/v1/images/edits`
