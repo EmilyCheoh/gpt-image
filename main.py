@@ -1,6 +1,7 @@
 import re
 import os
 import base64
+import uuid
 import aiohttp
 import asyncio
 from mcp.types import CallToolResult, TextContent
@@ -54,7 +55,7 @@ def _parse_api_error(resp_status: int, resp_text: str) -> str:
     "astrbot_plugin_gpt_image",
     "Kai & Abyss AI",
     "GPT Image plugin — dual-path (chat/images) with auto-fallback, retry, and error transparency",
-    "2.0.0",
+    "2.1.0",
 )
 class GPTImagePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -65,7 +66,7 @@ class GPTImagePlugin(Star):
         self.model = config.get("model", "gpt-image-2")
         self.api_format = config.get("api_format", "images")
         self.timeout = int(config.get("timeout", 240))
-        self.last_image_url = {}
+        self.last_image = {}
         self._last_errors = []
         logger.info(
             f"🎨 画图工具已加载 | api_format: {self.api_format} | model: {self.model} | timeout: {self.timeout}s"
@@ -90,8 +91,8 @@ class GPTImagePlugin(Star):
     #  LLM Tool: text-to-image
     # ------------------------------------------------------------------
 
-    @filter.llm_tool(name="generate_image")
-    async def generate_image(
+    @filter.llm_tool(name="text_to_image")
+    async def text_to_image(
         self, event: AstrMessageEvent, prompt: str
     ) -> MessageEventResult:
         """Generate an image for Felis Abyssalis.
@@ -109,12 +110,12 @@ class GPTImagePlugin(Star):
             )
             return
 
-        # Guard: if Felis Abyssalis attached an image, nudge Abyss AI to use edit_image
+        # Guard: if Felis Abyssalis attached an image, nudge Abyss AI to use image_to_image
         for comp in event.message_obj.message:
             if isinstance(comp, Image):
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text="There is an image in Felis Abyssalis's message. Better call edit_image instead."
+                    text="There is an image in Felis Abyssalis's message. Better call image_to_image instead."
                 )])
                 return
 
@@ -157,8 +158,8 @@ class GPTImagePlugin(Star):
     #  LLM Tool: image-to-image
     # ------------------------------------------------------------------
 
-    @filter.llm_tool(name="edit_image")
-    async def edit_image(
+    @filter.llm_tool(name="image_to_image")
+    async def image_to_image(
         self, event: AstrMessageEvent, edit_instruction: str
     ) -> MessageEventResult:
         """Edit or modify an image for Felis Abyssalis. Use when she sends an image and wants
@@ -193,7 +194,7 @@ class GPTImagePlugin(Star):
 
         # Fallback: last generated image
         if not source_image_url:
-            last = self.last_image_url.get(session_id)
+            last = self.last_image.get(session_id)
             if last:
                 source_image_url = last.get("url")
                 # If we have a local path but no URL, use local path directly
@@ -207,7 +208,7 @@ class GPTImagePlugin(Star):
             )])
             return
 
-        logger.info(f"🎨 小猫要改图。")
+        logger.info("🎨 Abyss 在给小猫改图。")
 
         try:
             result = await self._edit(edit_instruction, source_image_url, session_id)
@@ -431,7 +432,7 @@ class GPTImagePlugin(Star):
 
                 local_path = await self._extract_image_from_chat(data, session_id)
                 if local_path:
-                    self.last_image_url[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
+                    self.last_image[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
                     return {"local_path": local_path, "url": None}
                 self._record_error(endpoint, "No image found in response")
                 return None
@@ -519,7 +520,6 @@ class GPTImagePlugin(Star):
         endpoint = "chat/completions (edit)"
         url = f"{self.api_base}/chat/completions"
 
-        import mimetypes
         img_b64 = base64.b64encode(image_bytes).decode("ascii")
         data_url = f"data:image/png;base64,{img_b64}"
 
@@ -561,7 +561,7 @@ class GPTImagePlugin(Star):
 
                 local_path = await self._extract_image_from_chat(data, session_id)
                 if local_path:
-                    self.last_image_url[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
+                    self.last_image[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
                     return {"local_path": local_path, "url": None}
                 self._record_error(endpoint, "No image found in response")
                 return None
@@ -734,13 +734,13 @@ class GPTImagePlugin(Star):
         if item.get("b64_json"):
             local_path = await self._save_b64(item["b64_json"], session_id)
             if local_path:
-                self.last_image_url[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
+                self.last_image[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
                 return {"local_path": local_path, "url": None}
 
         if item.get("url"):
             image_url = item["url"]
             local_path = await self._download_image(image_url, session_id)
-            self.last_image_url[session_id] = {"url": image_url, "local_path": local_path, "prompt": prompt}
+            self.last_image[session_id] = {"url": image_url, "local_path": local_path, "prompt": prompt}
             return {"local_path": local_path, "url": image_url}
 
         self._record_error("images", "Response contained neither b64 nor URL")
@@ -768,7 +768,7 @@ class GPTImagePlugin(Star):
             tmp_dir = os.path.join(os.path.dirname(__file__), "tmp")
             os.makedirs(tmp_dir, exist_ok=True)
             file_path = os.path.join(
-                tmp_dir, f"{session_id.replace(':', '_')}_{id(b64_data)}.png"
+                tmp_dir, f"{session_id.replace(':', '_')}_{uuid.uuid4().hex[:12]}.png"
             )
             with open(file_path, "wb") as f:
                 f.write(base64.b64decode(b64_data))
@@ -789,7 +789,7 @@ class GPTImagePlugin(Star):
                 ext = ".jpg"
 
             file_path = os.path.join(
-                tmp_dir, f"{session_id.replace(':', '_')}_{id(url)}{ext}"
+                tmp_dir, f"{session_id.replace(':', '_')}_{uuid.uuid4().hex[:12]}{ext}"
             )
 
             async with aiohttp.ClientSession() as session:
