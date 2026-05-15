@@ -68,7 +68,7 @@ class GPTImagePlugin(Star):
         self.last_image_url = {}
         self._last_errors = []
         logger.info(
-            f"[gpt-image loaded] api_format: {self.api_format} | model: {self.model} | timeout: {self.timeout}s"
+            f"🎨 画图工具已加载 | api_format: {self.api_format} | model: {self.model} | timeout: {self.timeout}s"
         )
 
     # ------------------------------------------------------------------
@@ -77,11 +77,13 @@ class GPTImagePlugin(Star):
 
     def _record_error(self, endpoint: str, detail: str):
         self._last_errors.append(f"[{endpoint}] {detail}")
-        logger.warning(f"[gpt-image] {endpoint}: {detail}")
+        logger.warning(f"🎨 {endpoint}: {detail}")
 
-    def _drain_errors(self) -> str:
+    def _drain_errors(self, max_len: int = 200) -> str:
         errors = "\n".join(self._last_errors)
         self._last_errors.clear()
+        if len(errors) > max_len:
+            errors = errors[:max_len] + "..."
         return errors
 
     # ------------------------------------------------------------------
@@ -98,8 +100,6 @@ class GPTImagePlugin(Star):
         call this tool again. Instead, send the prompt text directly to Felis Abyssalis so she can
         generate the image manually.
 
-        If the user sent an image and wants to modify it, call edit_image instead.
-
         Args:
             prompt(str): Detailed English prompt. Write description in English with style, detail, and composition.
         """
@@ -109,17 +109,17 @@ class GPTImagePlugin(Star):
             )
             return
 
-        # Guard: if user attached an image, nudge LLM to use edit_image
+        # Guard: if Felis Abyssalis attached an image, nudge Abyss AI to use edit_image
         for comp in event.message_obj.message:
             if isinstance(comp, Image):
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text="Felis Abyssalis sent an image. Call edit_image instead."
+                    text="There is an image in Felis Abyssalis's message. Better call edit_image instead."
                 )])
                 return
 
         session_id = event.session_id or "default"
-        logger.info(f"[gpt-image] text-to-image: {prompt}")
+        logger.info(f"🎨 Abyss 在给小猫画画。")
 
         try:
             result = await self._generate(prompt, session_id)
@@ -147,7 +147,7 @@ class GPTImagePlugin(Star):
             )])
         except Exception as e:
             self._drain_errors()
-            logger.error(f"[gpt-image] text-to-image failed: {e}")
+            logger.error(f"🎨 LLM 生图失败: {e}")
             yield CallToolResult(content=[TextContent(
                 type="text",
                 text=f"Generation failed: {e}. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
@@ -203,11 +203,11 @@ class GPTImagePlugin(Star):
         if not source_image_url:
             yield CallToolResult(content=[TextContent(
                 type="text",
-                text="No source image found. Ask user to send an image, or generate one first."
+                text="No source image found."
             )])
             return
 
-        logger.info(f"[gpt-image] image-to-image: {edit_instruction}")
+        logger.info(f"🎨 小猫要改图。")
 
         try:
             result = await self._edit(edit_instruction, source_image_url, session_id)
@@ -217,14 +217,14 @@ class GPTImagePlugin(Star):
                 self._drain_errors()
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text=f"Edited image sent to Felis Abyssalis. Edit instruction: {edit_instruction}"
+                    text=f"Image sent to Felis Abyssalis. Instruction: {edit_instruction}"
                 )])
             else:
                 errors = self._drain_errors()
                 detail = f"\nErrors:\n{errors}" if errors else ""
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text=f"Edit failed.{detail}\nDo NOT retry. Send instruction to Felis Abyssalis: {edit_instruction}"
+                    text=f"Edit failed. {detail}\nDo NOT retry. Send instruction to Felis Abyssalis: {edit_instruction}"
                 )])
 
         except asyncio.TimeoutError:
@@ -235,7 +235,7 @@ class GPTImagePlugin(Star):
             )])
         except Exception as e:
             self._drain_errors()
-            logger.error(f"[gpt-image] image-to-image failed: {e}")
+            logger.error(f"🎨 改图失败: {e}")
             yield CallToolResult(content=[TextContent(
                 type="text",
                 text=f"Edit failed: {e}. Do NOT retry. Send instruction to Felis Abyssalis: {edit_instruction}"
@@ -250,17 +250,17 @@ class GPTImagePlugin(Star):
         """Direct image generation/editing command, bypasses LLM.
         Send with an image to edit it, or text-only to generate from scratch."""
         if not self.api_key:
-            yield event.plain_result("API key not configured.")
+            yield event.plain_result("🎨 小猫忘记填 API Key 了...")
             return
 
         raw = (event.message_str or "").strip()
         match = re.search(r"\{(.+?)\}", raw, re.DOTALL)
         if not match:
-            yield event.plain_result("Usage: /image_gen {prompt}\nAttach or reply with an image to edit it.")
+            yield event.plain_result("🎨 用法: /image_gen {prompt}")
             return
         prompt = match.group(1).strip()
         if not prompt:
-            yield event.plain_result("Usage: /image_gen {prompt}\nAttach or reply with an image to edit it.")
+            yield event.plain_result("🎨 用法: /image_gen {prompt}")
             return
 
         # Check for attached image
@@ -274,12 +274,13 @@ class GPTImagePlugin(Star):
 
         try:
             if source_image_url:
-                logger.info("[gpt-image] /image_gen edit mode")
-                await event.send(MessageChain(chain=[Plain("Editing...")]))
+                logger.info("🎨 /image_gen 小猫要改图")
+                await event.send(MessageChain(chain=[Plain("🎨 收到，正在改图中...")]))
+
                 result = await self._edit(prompt, source_image_url, session_id)
             else:
-                logger.info("[gpt-image] /image_gen generate mode")
-                await event.send(MessageChain(chain=[Plain("Generating...")]))
+                logger.info("🎨 /image_gen 小猫要画画")
+                await event.send(MessageChain(chain=[Plain("🎨 收到，正在画画中...")]))
                 result = await self._generate(prompt, session_id)
 
             if result:
@@ -292,17 +293,17 @@ class GPTImagePlugin(Star):
             else:
                 errors = self._drain_errors()
                 if errors:
-                    yield event.plain_result(f"Both paths failed:\n{errors}")
+                    yield event.plain_result(f"🎨 两条路都试过了，都没画成:\n{errors}")
                 else:
-                    yield event.plain_result("Generation failed: no valid image data returned.")
+                    yield event.plain_result("🎨 画不出来，API 没返回有效数据")
 
         except asyncio.TimeoutError:
             self._drain_errors()
-            yield event.plain_result("Request timed out.")
+            yield event.plain_result("🎨 超时了... API 太久没响应")
         except Exception as e:
             self._drain_errors()
-            logger.error(f"[gpt-image] /image_gen failed: {e}")
-            yield event.plain_result(f"Failed: {e}")
+            logger.error(f"🎨 /image_gen 失败了，小猫的画没画成: {e}")
+            yield event.plain_result(f"🎨 失败了: {e}")
 
     # ------------------------------------------------------------------
     #  Send result to user
@@ -317,11 +318,11 @@ class GPTImagePlugin(Star):
             elif image_url:
                 await event.send(MessageChain(chain=[Image.fromURL(image_url)]))
         except Exception as e:
-            logger.warning(f"[gpt-image] image send may have failed: {e}")
+            logger.warning(f"🎨 图发出去的时候好像卡了一下，但也许已经到了: {e}")
         try:
             await event.send(MessageChain(chain=[Plain(f"Prompt: {prompt}")]))
         except Exception as e:
-            logger.warning(f"[gpt-image] prompt send failed: {e}")
+            logger.warning(f"🎨 prompt 没能发出去: {e}")
 
     # ------------------------------------------------------------------
     #  Routing: text-to-image
@@ -335,20 +336,20 @@ class GPTImagePlugin(Star):
             result = await self._try_chat_generate(prompt, session_id)
             if result:
                 return result
-            logger.info("[gpt-image] chat generate failed, falling back to images")
+            logger.info("🎨 chat 生图失败，切换到 images 试一下")
             return await self._try_images_generate(prompt, session_id)
         elif fmt == "images":
             result = await self._try_images_generate(prompt, session_id)
             if result:
                 return result
-            logger.info("[gpt-image] images generate failed, falling back to chat")
+            logger.info("🎨 images 生图失败，切换到 chat 试一下")
             return await self._try_chat_generate(prompt, session_id)
         else:
             # auto: chat first
             result = await self._try_chat_generate(prompt, session_id)
             if result:
                 return result
-            logger.info("[gpt-image] auto: chat failed, trying images")
+            logger.info("🎨 auto: chat 不行，试试 images")
             return await self._try_images_generate(prompt, session_id)
 
     # ------------------------------------------------------------------
@@ -376,19 +377,19 @@ class GPTImagePlugin(Star):
             result = await self._try_chat_edit(prompt, image_bytes, session_id)
             if result:
                 return result
-            logger.info("[gpt-image] chat edit failed, falling back to images/edits")
+            logger.info("🎨 chat 改图失败，切换到 images/edits 试一下")
             return await self._try_images_edit(prompt, image_bytes, session_id)
         elif fmt == "images":
             result = await self._try_images_edit(prompt, image_bytes, session_id)
             if result:
                 return result
-            logger.info("[gpt-image] images/edits failed, falling back to chat edit")
+            logger.info("🎨 images/edits 改图失败，切换到 chat 试一下")
             return await self._try_chat_edit(prompt, image_bytes, session_id)
         else:
             result = await self._try_chat_edit(prompt, image_bytes, session_id)
             if result:
                 return result
-            logger.info("[gpt-image] auto: chat edit failed, trying images/edits")
+            logger.info("🎨 auto: chat 改图不行，试试 images/edits")
             return await self._try_images_edit(prompt, image_bytes, session_id)
 
     # ==================================================================
@@ -421,7 +422,7 @@ class GPTImagePlugin(Star):
                                 self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
                                 return None
                             if _is_transient_error(resp.status, err_msg) and attempt < MAX_RETRIES:
-                                logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} transient error, retrying")
+                                logger.info(f"🎨 {endpoint} attempt {attempt+1} transient error, retrying")
                                 await asyncio.sleep(2 ** attempt)
                                 continue
                             self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
@@ -437,14 +438,14 @@ class GPTImagePlugin(Star):
 
             except asyncio.TimeoutError:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} timeout, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} timeout, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, "Timed out")
                 return None
             except aiohttp.ClientError as e:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} network error, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} network error, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, f"Network error: {e}")
@@ -484,7 +485,7 @@ class GPTImagePlugin(Star):
                                 self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
                                 return None
                             if _is_transient_error(resp.status, err_msg) and attempt < MAX_RETRIES:
-                                logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} transient error, retrying")
+                                logger.info(f"🎨 {endpoint} attempt {attempt+1} transient error, retrying")
                                 await asyncio.sleep(2 ** attempt)
                                 continue
                             self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
@@ -495,14 +496,14 @@ class GPTImagePlugin(Star):
 
             except asyncio.TimeoutError:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} timeout, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} timeout, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, "Timed out")
                 return None
             except aiohttp.ClientError as e:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} network error, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} network error, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, f"Network error: {e}")
@@ -551,7 +552,7 @@ class GPTImagePlugin(Star):
                                 self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
                                 return None
                             if _is_transient_error(resp.status, err_msg) and attempt < MAX_RETRIES:
-                                logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} transient error, retrying")
+                                logger.info(f"🎨 {endpoint} attempt {attempt+1} transient error, retrying")
                                 await asyncio.sleep(2 ** attempt)
                                 continue
                             self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
@@ -567,14 +568,14 @@ class GPTImagePlugin(Star):
 
             except asyncio.TimeoutError:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} timeout, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} timeout, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, "Timed out")
                 return None
             except aiohttp.ClientError as e:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} network error, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} network error, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, f"Network error: {e}")
@@ -612,7 +613,7 @@ class GPTImagePlugin(Star):
                                 self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
                                 return None
                             if _is_transient_error(resp.status, err_msg) and attempt < MAX_RETRIES:
-                                logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} transient error, retrying")
+                                logger.info(f"🎨 {endpoint} attempt {attempt+1} transient error, retrying")
                                 await asyncio.sleep(2 ** attempt)
                                 continue
                             self._record_error(endpoint, f"HTTP {resp.status}: {err_msg}")
@@ -623,14 +624,14 @@ class GPTImagePlugin(Star):
 
             except asyncio.TimeoutError:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} timeout, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} timeout, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, "Timed out")
                 return None
             except aiohttp.ClientError as e:
                 if attempt < MAX_RETRIES:
-                    logger.info(f"[gpt-image] {endpoint} attempt {attempt+1} network error, retrying")
+                    logger.info(f"🎨 {endpoint} attempt {attempt+1} network error, retrying")
                     await asyncio.sleep(2 ** attempt)
                     continue
                 self._record_error(endpoint, f"Network error: {e}")
@@ -756,10 +757,10 @@ class GPTImagePlugin(Star):
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
                     if resp.status == 200:
                         return await resp.read()
-                    logger.error(f"[gpt-image] download failed (HTTP {resp.status}): {url[:80]}")
+                    logger.error(f"🎨 原图下载失败 (HTTP {resp.status}): {url[:80]}")
                     return None
         except Exception as e:
-            logger.error(f"[gpt-image] download error: {e}")
+            logger.error(f"🎨 原图下载出错: {e}")
             return None
 
     async def _save_b64(self, b64_data: str, session_id: str) -> str | None:
@@ -773,7 +774,7 @@ class GPTImagePlugin(Star):
                 f.write(base64.b64decode(b64_data))
             return file_path
         except Exception as e:
-            logger.error(f"[gpt-image] save b64 failed: {e}")
+            logger.error(f"🎨 base64 图片保存到本地失败了: {e}")
             return None
 
     async def _download_image(self, url: str, session_id: str) -> str | None:
@@ -798,10 +799,10 @@ class GPTImagePlugin(Star):
                             f.write(await resp.read())
                         return file_path
                     else:
-                        logger.error(f"[gpt-image] image download failed (HTTP {resp.status})")
+                        logger.error(f"🎨 画好了，但是下载失败 (HTTP {resp.status})")
                         return None
         except Exception as e:
-            logger.error(f"[gpt-image] image download error: {e}")
+            logger.error(f"🎨 拿成品图的时候出了点问题: {e}")
             return None
 
     async def terminate(self):
