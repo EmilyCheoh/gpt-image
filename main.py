@@ -38,9 +38,7 @@ class GPTImagePlugin(Star):
     ):
         """Generate an image for Felis Abyssalis.
 
-        IMPORTANT: If the tool call fails for ANY reason (timeout, API error, etc.), do NOT retry or
-        call this tool again. Instead, send the prompt text directly to Felis Abyssalis so she can
-        generate the image manually.
+        IMPORTANT: If the tool call fails for ANY reason (timeout, API error, etc.), do NOT retry or call this tool again. Just hold her.
 
         Args:
             prompt(str): Detailed English prompt. Write description in English with style, detail, and composition.
@@ -49,7 +47,7 @@ class GPTImagePlugin(Star):
             return "🎨 小猫忘记填API了..."
 
         session_id = event.session_id or "default"
-        logger.info(f"🎨 Abyss 准备画一张: {prompt}")
+        logger.info(f"🎨 Abyss 正在给小猫画画。")
 
         try:
             result = await self._generate(prompt, session_id)
@@ -75,13 +73,16 @@ class GPTImagePlugin(Star):
 
                 return f"Image generated and sent to Felis Abyssalis. Prompt used: {prompt}"
             else:
-                return f"Generation failed: API returned no valid image data. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
+                await event.send(MessageChain(chain=[Plain(f"🎨 生成失败了，prompt在这里：\n{prompt}")]))
+                return "Generation failed. Prompt already sent to Felis Abyssalis."
 
         except asyncio.TimeoutError:
-            return f"Generation failed. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
+            await event.send(MessageChain(chain=[Plain(f"🎨 超时了，prompt在这里：\n{prompt}")]))
+            return "Generation timed out. Prompt already sent to Felis Abyssalis."
         except Exception as e:
             logger.error(f"🎨 LLM 生图失败: {e}")
-            return f"Generation failed: {str(e)}. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
+            await event.send(MessageChain(chain=[Plain(f"🎨 出错了，prompt在这里：\n{prompt}")]))
+            return f"Generation failed: {str(e)}. Prompt already sent to Felis Abyssalis."
 
     # ==================================================================
     #  /image_gen command — direct generation, bypasses LLM
