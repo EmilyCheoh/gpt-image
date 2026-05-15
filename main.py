@@ -3,7 +3,6 @@ import os
 import base64
 import aiohttp
 import asyncio
-from mcp.types import CallToolResult, TextContent
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api.message_components import Image, Plain
@@ -15,7 +14,7 @@ from astrbot.core.message.message_event_result import MessageChain
     "astrbot_plugin_gpt_image",
     "Kai & Abyss AI",
     "GPT Image plugin — OpenAI images API / chat completions",
-    "1.3.0",
+    "1.4.0",
 )
 class GPTImagePlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
@@ -29,10 +28,14 @@ class GPTImagePlugin(Star):
         self.last_image_url = {}
         logger.info(f"[画图工具已加载] api_format: {self.api_format} / model: {self.model} / timeout: {self.timeout}s")
 
+    # ==================================================================
+    #  LLM tool — called by the model via function calling
+    # ==================================================================
+
     @filter.llm_tool(name="generate_image")
     async def generate_image(
         self, event: AstrMessageEvent, prompt: str
-    ) -> MessageEventResult:
+    ):
         """Generate an image for Felis Abyssalis.
 
         IMPORTANT: If the tool call fails for ANY reason (timeout, API error, etc.), do NOT retry or
@@ -43,8 +46,7 @@ class GPTImagePlugin(Star):
             prompt(str): Detailed English prompt. Write description in English with style, detail, and composition.
         """
         if not self.api_key:
-            yield CallToolResult(content=[TextContent(type="text", text="🎨 小猫忘记填API了...")])
-            return
+            return "🎨 小猫忘记填API了..."
 
         session_id = event.session_id or "default"
         logger.info(f"🎨 Abyss 准备画一张: {prompt}")
@@ -71,21 +73,19 @@ class GPTImagePlugin(Star):
                 except Exception as send_err:
                     logger.warning(f"🎨 prompt 没能发出去: {send_err}")
 
-                yield CallToolResult(content=[TextContent(
-                    type="text",
-                    text=f"Image generated and sent to Felis Abyssalis. Prompt used: {prompt}"
-                )])
+                return f"Image generated and sent to Felis Abyssalis. Prompt used: {prompt}"
             else:
-                yield CallToolResult(content=[TextContent(
-                    type="text",
-                    text=f"Generation failed: API returned no valid image data. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
-                )])
+                return f"Generation failed: API returned no valid image data. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
 
         except asyncio.TimeoutError:
-            yield CallToolResult(content=[TextContent(type="text", text=f"Generation failed. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}")])
+            return f"Generation failed. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
         except Exception as e:
             logger.error(f"🎨 LLM 生图失败: {e}")
-            yield CallToolResult(content=[TextContent(type="text", text=f"Generation failed: {str(e)}. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}")])
+            return f"Generation failed: {str(e)}. Do NOT retry. Send prompt to Felis Abyssalis for manual generation: {prompt}"
+
+    # ==================================================================
+    #  /image_gen command — direct generation, bypasses LLM
+    # ==================================================================
 
     @filter.command("image_gen")
     async def image_gen_command(self, event: AstrMessageEvent):
@@ -141,31 +141,18 @@ class GPTImagePlugin(Star):
             logger.error(f"🎨 /image_gen 失败，小猫的画没画成: {e}")
             yield event.plain_result(f"🎨 失败了...\n错误: {str(e)}")
 
+    # ==================================================================
+    #  Image editing (image-to-image)
+    # ==================================================================
+
     async def _edit(self, prompt: str, image_url: str, session_id: str) -> dict | None:
         """Download source image and send to /v1/images/edits endpoint"""
-        # Download the source image first
-        image_bytes = await self._download_image_bytes(image_url)
+        image_bytes = await self._download_raw(image_url)
         if not image_bytes:
             logger.error("🎨 原图下载失败，没法帮小猫改图")
             return None
 
         return await self._try_images_edit_api(prompt, image_bytes, session_id)
-
-    async def _download_image_bytes(self, url: str) -> bytes | None:
-        """Download an image and return raw bytes"""
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url, timeout=aiohttp.ClientTimeout(total=30)
-                ) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-                    else:
-                        logger.error(f"🎨 原图下载失败 (HTTP {resp.status})")
-                        return None
-        except Exception as e:
-            logger.error(f"🎨 原图下载出错: {e}")
-            return None
 
     async def _try_images_edit_api(self, prompt: str, image_bytes: bytes, session_id: str) -> dict | None:
         """OpenAI /v1/images/edits endpoint (image-to-image)"""
@@ -189,35 +176,23 @@ class GPTImagePlugin(Star):
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.warning(f"🎨 改图 API 返回错误 (HTTP {resp.status}): {text[:200]}")
+                        self._record_error("edit", f"HTTP {resp.status}: {text[:200]}")
                         return None
 
                     data = await resp.json()
 
             logger.info(f"🎨 图改好了 | 数据预览: {str(data)[:300]}")
+            return await self._parse_images_result(data, "edit", session_id)
 
-            items = data.get("data", [])
-            if not items:
-                return None
-
-            item = items[0]
-
-            if "b64_json" in item and item["b64_json"]:
-                local_path = await self._save_b64(item["b64_json"], session_id)
-                if local_path:
-                    return {"local_path": local_path, "url": None}
-
-            if "url" in item and item["url"]:
-                image_url = item["url"]
-                local_path = await self._download_image(image_url, session_id)
-                return {"local_path": local_path, "url": image_url}
-
-            return None
         except asyncio.TimeoutError:
             raise
         except Exception as e:
-            logger.warning(f"🎨 改图 API 出错了: {e}")
+            self._record_error("edit", str(e))
             return None
+
+    # ==================================================================
+    #  Generation routing
+    # ==================================================================
 
     async def _generate(self, prompt: str, session_id: str) -> dict | None:
         """Route to images or chat API based on api_format config"""
@@ -235,8 +210,11 @@ class GPTImagePlugin(Star):
             logger.info("🎨 images 接口探测失败，切换到 chat 接口试一下")
             return await self._try_chat_api(prompt, session_id)
 
+    # ==================================================================
+    #  /v1/images/generations endpoint
+    # ==================================================================
+
     async def _try_images_api(self, prompt: str, session_id: str, quick_timeout: int = 0) -> dict | None:
-        """OpenAI /v1/images/generations endpoint"""
         url = f"{self.api_base}/images/generations"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -259,43 +237,29 @@ class GPTImagePlugin(Star):
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.warning(f"🎨 生图 API 返回错误 (HTTP {resp.status}): {text[:200]}")
+                        self._record_error("images", f"HTTP {resp.status}: {text[:200]}")
                         return None
 
                     data = await resp.json()
 
             logger.info(f"🎨 画好了 | 数据预览: {str(data)[:300]}")
+            result = await self._parse_images_result(data, prompt, session_id)
+            return result
 
-            items = data.get("data", [])
-            if not items:
-                return None
-
-            item = items[0]
-
-            if "b64_json" in item and item["b64_json"]:
-                local_path = await self._save_b64(item["b64_json"], session_id)
-                if local_path:
-                    self.last_image_url[session_id] = {"url": None, "prompt": prompt}
-                    return {"local_path": local_path, "url": None}
-
-            if "url" in item and item["url"]:
-                image_url = item["url"]
-                local_path = await self._download_image(image_url, session_id)
-                self.last_image_url[session_id] = {"url": image_url, "prompt": prompt}
-                return {"local_path": local_path, "url": image_url}
-
-            return None
         except asyncio.TimeoutError:
             if quick_timeout > 0:
                 logger.info(f"🎨 images 接口探测超时 ({quick_timeout}s)，切换到其他模式")
                 return None
             raise
         except Exception as e:
-            logger.warning(f"🎨 生图 API 出错了: {e}")
+            self._record_error("images", str(e))
             return None
 
+    # ==================================================================
+    #  /v1/chat/completions endpoint
+    # ==================================================================
+
     async def _try_chat_api(self, prompt: str, session_id: str) -> dict | None:
-        """chat/completions endpoint"""
         url = f"{self.api_base}/chat/completions"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -314,43 +278,153 @@ class GPTImagePlugin(Star):
                 ) as resp:
                     if resp.status != 200:
                         text = await resp.text()
-                        logger.warning(f"🎨 chat 接口返回错误 (HTTP {resp.status}): {text[:200]}")
+                        self._record_error("chat", f"HTTP {resp.status}: {text[:200]}")
                         return None
 
                     data = await resp.json()
 
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            logger.info(f"🎨 chat 接口返回成功了 | 内容预览: {content[:300]}")
+            logger.info(f"🎨 chat 接口返回成功了 | 数据预览: {str(data)[:300]}")
+            result = await self._extract_chat_image(data, session_id)
+            if result:
+                local_path = result if isinstance(result, str) else result.get("local_path")
+                self.last_image_url[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
+                return {"local_path": local_path, "url": None}
 
-            if "失败" in content or "error" in content.lower():
-                logger.error(f"🎨 chat 接口返回了错误内容，说画不了: {content}")
-                return None
-
-            image_url = self._extract_url_from_content(content)
-            if image_url:
-                local_path = await self._download_image(image_url, session_id)
-                self.last_image_url[session_id] = {"url": image_url, "prompt": prompt}
-                return {"local_path": local_path, "url": image_url}
-
+            self._record_error("chat", "Could not extract image from chat response")
             return None
+
         except asyncio.TimeoutError:
             raise
         except Exception as e:
-            logger.warning(f"🎨 chat 接口出错了: {e}")
+            self._record_error("chat", str(e))
             return None
 
-    def _extract_url_from_content(self, content: str) -> str | None:
-        """Extract image URL from markdown content"""
-        patterns = [
-            r"!\[.*?\]\((https?://[^\s\)]+)\)",
-            r"\[.*?下载.*?\]\((https?://[^\s\)]+)\)",
-            r'(https?://[^\s\)\"]+\.(?:png|jpg|jpeg|webp|gif))',
-        ]
-        for pattern in patterns:
-            match = re.search(pattern, content)
-            if match:
-                return match.group(1)
+    # ==================================================================
+    #  Response parsing: /images/* endpoints
+    # ==================================================================
+
+    async def _parse_images_result(self, data: dict, prompt: str, session_id: str) -> dict | None:
+        items = data.get("data", [])
+        if not items:
+            self._record_error("images", "API returned empty data")
+            return None
+
+        item = items[0]
+
+        if item.get("b64_json"):
+            local_path = await self._save_b64(item["b64_json"], session_id)
+            if local_path:
+                self.last_image_url[session_id] = {"url": None, "local_path": local_path, "prompt": prompt}
+                return {"local_path": local_path, "url": None}
+
+        if item.get("url"):
+            image_url = item["url"]
+            local_path = await self._download_image(image_url, session_id)
+            self.last_image_url[session_id] = {"url": image_url, "local_path": local_path, "prompt": prompt}
+            return {"local_path": local_path, "url": image_url}
+
+        self._record_error("images", "Response contained neither b64 nor URL")
         return None
+
+    # ==================================================================
+    #  Response parsing: chat/completions (universal extractor)
+    # ==================================================================
+
+    async def _extract_chat_image(self, data: dict, session_id: str) -> str | None:
+        """Extract image from chat response. Handles every known provider format."""
+        msg = (data.get("choices") or [{}])[0].get("message", {})
+        if not msg:
+            return None
+
+        # 1. message.images array (some providers)
+        images = msg.get("images")
+        if isinstance(images, list) and images:
+            img = images[0]
+            if isinstance(img, dict):
+                if img.get("b64_json"):
+                    return await self._save_b64(img["b64_json"], session_id)
+                if img.get("url"):
+                    return await self._download_image(img["url"], session_id)
+
+        # 2. message.content is a list (multimodal content blocks)
+        content = msg.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+                ptype = part.get("type", "")
+
+                # image_url block with data-uri or http url
+                if ptype == "image_url":
+                    iu = part.get("image_url")
+                    if isinstance(iu, dict):
+                        u = iu.get("url", "")
+                        if u.startswith("data:"):
+                            return await self._save_b64(u.split(",", 1)[-1], session_id)
+                        if u.startswith("http"):
+                            return await self._download_image(u, session_id)
+
+                # image or image_generation block
+                if ptype in ("image", "image_generation"):
+                    if part.get("image"):
+                        return await self._save_b64(part["image"], session_id)
+                    if part.get("b64_json"):
+                        return await self._save_b64(part["b64_json"], session_id)
+
+                # generic b64 field
+                if part.get("b64_json"):
+                    return await self._save_b64(part["b64_json"], session_id)
+
+        # 3. message.content is a string
+        if isinstance(content, str) and content:
+            # 3a. inline data-uri base64
+            b64_match = re.search(r"data:image/\w+;base64,([A-Za-z0-9+/=]{100,})", content)
+            if b64_match:
+                return await self._save_b64(b64_match.group(1), session_id)
+            # 3b. markdown image
+            md_match = re.search(r"!\[.*?\]\((https?://[^\s)]+)\)", content)
+            if md_match:
+                return await self._download_image(md_match.group(1), session_id)
+            # 3c. download link
+            dl_match = re.search(r"\[.*?下载.*?\]\((https?://[^\s)]+)\)", content)
+            if dl_match:
+                return await self._download_image(dl_match.group(1), session_id)
+            # 3d. bare image URL
+            url_match = re.search(r'(https?://[^\s)"]+\.(?:png|jpg|jpeg|webp|gif))', content, re.IGNORECASE)
+            if url_match:
+                return await self._download_image(url_match.group(1), session_id)
+
+        # 4. top-level data array (some proxies wrap images format into chat response)
+        items = data.get("data", [])
+        if items and isinstance(items, list):
+            it = items[0]
+            if isinstance(it, dict):
+                if it.get("b64_json"):
+                    return await self._save_b64(it["b64_json"], session_id)
+                if it.get("url"):
+                    return await self._download_image(it["url"], session_id)
+
+        return None
+
+    # ==================================================================
+    #  Utilities
+    # ==================================================================
+
+    def _record_error(self, source: str, msg: str):
+        logger.warning(f"🎨 [{source}] {msg}")
+
+    async def _download_raw(self, url: str) -> bytes | None:
+        """Download URL and return raw bytes."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+                    logger.error(f"🎨 download failed (HTTP {resp.status}): {url[:80]}")
+                    return None
+        except Exception as e:
+            logger.error(f"🎨 download error: {e}")
+            return None
 
     async def _save_b64(self, b64_data: str, session_id: str) -> str | None:
         try:

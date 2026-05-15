@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.4.0
+
+- 修了消息分裂bug — yield CallToolResult(...) 
+- _download_raw — 替代旧的 _download_image_bytes，更干净
+- _extract_chat_image — 万能chat response解析器，能处理所有已知provider的图片返回格式
+- _parse_images_result — images endpoint的结果解析，改成async
+
+
 ## 1.3.0
 
 - Added image-to-image editing to `/image_gen` — attach an image with the command to edit it via `/v1/images/edits`
