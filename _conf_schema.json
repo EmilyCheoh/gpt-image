@@ -15,7 +15,7 @@
     "default": "gpt-image-2"
   },
   "api_format": {
-    "description": "images, chat, auto = 先 chat 后 images",
+    "description": "images = /images/generations, chat = /chat/completions, auto = 先 images 后 chat",
     "type": "string",
     "default": "images"
   },

@@ -4,12 +4,12 @@ GPT Image plugin for AstrBot — generates images via OpenAI-compatible API endp
 
 ## Features
 
-- **LLM tools**: `text_to_image` and `image_to_image`（以图改图）— LLM automatically calls these when Felis Abyssalis asks to draw or edit an image.
+- **LLM tool** (`generate_image`): LLM automatically calls this when Felis Abyssalis asks to draw/generate an image. Translates the request into a detailed English prompt.
 - **Direct command** (`/image_gen {prompt}`): Bypasses LLM entirely. Send the prompt wrapped in `{}` to generate an image directly. Attach an image in the same message to edit it (image-to-image).
 - Supports two API formats:
   - `images` — standard `/v1/images/generations` endpoint
   - `chat` — `/v1/chat/completions` endpoint (extracts image URL from response)
-  - `auto` — tries `chat` first, falls back to `images`
+  - `auto` — tries `images` first (15s probe), falls back to `chat`
 
 ## Usage
 
