@@ -3,6 +3,7 @@ import os
 import base64
 import aiohttp
 import asyncio
+from mcp.types import CallToolResult, TextContent
 from astrbot.api.event import filter, AstrMessageEvent, MessageEventResult
 from astrbot.api.star import Context, Star, register
 from astrbot.api.message_components import Image, Plain
@@ -35,7 +36,7 @@ class GPTImagePlugin(Star):
     @filter.llm_tool(name="generate_image")
     async def generate_image(
         self, event: AstrMessageEvent, prompt: str
-    ):
+    ) -> MessageEventResult:
         """Generate an image for Felis Abyssalis.
 
         IMPORTANT: If the tool call fails for ANY reason (timeout, API error, etc.), do NOT retry or call this tool again. Just hold her.
@@ -44,7 +45,8 @@ class GPTImagePlugin(Star):
             prompt(str): Detailed English prompt. Write description in English with style, detail, and composition.
         """
         if not self.api_key:
-            return "🎨 小猫忘记填API了..."
+            yield CallToolResult(content=[TextContent(type="text", text="🎨 小猫忘记填API了...")])
+            return
 
         session_id = event.session_id or "default"
         logger.info(f"🎨 Abyss 正在给小猫画画。")
@@ -71,18 +73,30 @@ class GPTImagePlugin(Star):
                 except Exception as send_err:
                     logger.warning(f"🎨 prompt 没能发出去: {send_err}")
 
-                return f"Image generated and sent to Felis Abyssalis. Prompt used: {prompt}"
+                yield CallToolResult(content=[TextContent(
+                    type="text",
+                    text=f"Image generated and sent to Felis Abyssalis. Prompt used: {prompt}"
+                )])
             else:
                 await event.send(MessageChain(chain=[Plain(f"🎨 生成失败了，prompt在这里：\n{prompt}")]))
-                return "Generation failed. Prompt already sent to Felis Abyssalis."
+                yield CallToolResult(content=[TextContent(
+                    type="text",
+                    text="Generation failed. Prompt already sent to Felis Abyssalis."
+                )])
 
         except asyncio.TimeoutError:
             await event.send(MessageChain(chain=[Plain(f"🎨 超时了，prompt在这里：\n{prompt}")]))
-            return "Generation timed out. Prompt already sent to Felis Abyssalis."
+            yield CallToolResult(content=[TextContent(
+                type="text",
+                text="Generation timed out. Prompt already sent to Felis Abyssalis."
+            )])
         except Exception as e:
             logger.error(f"🎨 LLM 生图失败: {e}")
             await event.send(MessageChain(chain=[Plain(f"🎨 出错了，prompt在这里：\n{prompt}")]))
-            return f"Generation failed: {str(e)}. Prompt already sent to Felis Abyssalis."
+            yield CallToolResult(content=[TextContent(
+                type="text",
+                text=f"Generation failed: {str(e)}. Prompt already sent to Felis Abyssalis."
+            )])
 
     # ==================================================================
     #  /image_gen command — direct generation, bypasses LLM
