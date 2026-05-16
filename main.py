@@ -27,25 +27,7 @@ class GPTImagePlugin(Star):
         self.api_format = config.get("api_format", "images")
         self.timeout = int(config.get("timeout", 240))
         self.last_image_url = {}
-        self._pending_assistant_text = {}
         logger.info(f"[画图工具已加载] api_format: {self.api_format} / model: {self.model} / timeout: {self.timeout}s")
-
-    # ==================================================================
-    #  Hook: capture assistant text from LLM response before tool runs
-    # ==================================================================
-
-    @filter.on_llm_response()
-    async def _capture_llm_response(self, event: AstrMessageEvent, resp):
-        """Capture the assistant's text when a tool call is present."""
-        session_id = event.session_id or "default"
-        try:
-            text = resp._completion_text or ""
-            has_tool_call = bool(resp.tools_call_name)
-            if text and has_tool_call:
-                self._pending_assistant_text[session_id] = text
-                logger.info(f"🎨 捕获到工具调用前的文本 ({len(text)} chars)")
-        except Exception as e:
-            logger.warning(f"🎨 捕获文本时出错: {e}")
 
     # ==================================================================
     #  LLM tool — called by the model via function calling
@@ -68,14 +50,6 @@ class GPTImagePlugin(Star):
 
         session_id = event.session_id or "default"
         logger.info(f"🎨 Abyss 正在给小猫画画。")
-
-        # Send the captured assistant text to Felis Abyssalis
-        captured_text = self._pending_assistant_text.pop(session_id, None)
-        if captured_text:
-            try:
-                await event.send(MessageChain(chain=[Plain(f"——\n{captured_text}")]))
-            except Exception as e:
-                logger.warning(f"🎨 补发文本失败: {e}")
 
         try:
             result = await self._generate(prompt, session_id)
