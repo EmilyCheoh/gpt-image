@@ -81,21 +81,21 @@ class GPTImagePlugin(Star):
                 await event.send(MessageChain(chain=[Plain(f"🎨 生成失败了，prompt在这里：\n{prompt}")]))
                 yield CallToolResult(content=[TextContent(
                     type="text",
-                    text="Generation failed. Prompt already sent to Felis Abyssalis."
+                    text=f"Generation failed. Prompt already sent to Felis Abyssalis.\nPrompt used: {prompt}"
                 )])
 
         except asyncio.TimeoutError:
             await event.send(MessageChain(chain=[Plain(f"🎨 超时了，prompt在这里：\n{prompt}")]))
             yield CallToolResult(content=[TextContent(
                 type="text",
-                text="Generation timed out. Prompt already sent to Felis Abyssalis."
+                text=f"Generation timed out. Prompt already sent to Felis Abyssalis.\nPrompt used: {prompt}"
             )])
         except Exception as e:
             logger.error(f"🎨 LLM 生图失败: {e}")
             await event.send(MessageChain(chain=[Plain(f"🎨 出错了，prompt在这里：\n{prompt}")]))
             yield CallToolResult(content=[TextContent(
                 type="text",
-                text=f"Generation failed: {str(e)}. Prompt already sent to Felis Abyssalis."
+                text=f"Generation failed: {str(e)}. Prompt already sent to Felis Abyssalis.\nPrompt used: {prompt}"
             )])
 
     # ==================================================================
