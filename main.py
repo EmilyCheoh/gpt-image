@@ -210,26 +210,28 @@ class GPTImagePlugin(Star):
     # ==================================================================
 
     async def _generate(self, prompt: str, session_id: str) -> dict | None:
-        """Route to images or chat API based on api_format config"""
+        """Route to images or chat API based on api_format config, with fallback"""
         fmt = self.api_format.lower().strip()
 
-        if fmt == "images":
-            return await self._try_images_api(prompt, session_id)
-        elif fmt == "chat":
-            return await self._try_chat_api(prompt, session_id)
+        if fmt == "chat":
+            primary, fallback = self._try_chat_api, self._try_images_api
+            fallback_name = "images"
         else:
-            # auto: quick-probe images (15s timeout), fallback to chat
-            result = await self._try_images_api(prompt, session_id, quick_timeout=15)
-            if result:
-                return result
-            logger.info("🎨 images 接口探测失败，切换到 chat 接口试一下")
-            return await self._try_chat_api(prompt, session_id)
+            primary, fallback = self._try_images_api, self._try_chat_api
+            fallback_name = "chat"
+
+        result = await primary(prompt, session_id)
+        if result:
+            return result
+
+        logger.info(f"🎨 主路由没通，切换到 {fallback_name} 接口再试一次")
+        return await fallback(prompt, session_id)
 
     # ==================================================================
     #  /v1/images/generations endpoint
     # ==================================================================
 
-    async def _try_images_api(self, prompt: str, session_id: str, quick_timeout: int = 0) -> dict | None:
+    async def _try_images_api(self, prompt: str, session_id: str) -> dict | None:
         url = f"{self.api_base}/images/generations"
         headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -242,14 +244,16 @@ class GPTImagePlugin(Star):
             "size": "1024x1024",
         }
 
-        timeout_val = quick_timeout if quick_timeout > 0 else self.timeout
-
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     url, json=payload, headers=headers,
-                    timeout=aiohttp.ClientTimeout(total=timeout_val),
+                    timeout=aiohttp.ClientTimeout(total=self.timeout),
                 ) as resp:
+                    if resp.status >= 500:
+                        text = await resp.text()
+                        self._record_error("images", f"HTTP {resp.status}: {text[:200]}")
+                        raise RuntimeError(f"Server error HTTP {resp.status}")
                     if resp.status != 200:
                         text = await resp.text()
                         self._record_error("images", f"HTTP {resp.status}: {text[:200]}")
@@ -258,13 +262,9 @@ class GPTImagePlugin(Star):
                     data = await resp.json()
 
             logger.info(f"🎨 画好了 | 数据预览: {str(data)[:300]}")
-            result = await self._parse_images_result(data, prompt, session_id)
-            return result
+            return await self._parse_images_result(data, prompt, session_id)
 
-        except asyncio.TimeoutError:
-            if quick_timeout > 0:
-                logger.info(f"🎨 images 接口探测超时 ({quick_timeout}s)，切换到其他模式")
-                return None
+        except (asyncio.TimeoutError, RuntimeError):
             raise
         except Exception as e:
             self._record_error("images", str(e))
@@ -291,6 +291,10 @@ class GPTImagePlugin(Star):
                     url, json=payload, headers=headers,
                     timeout=aiohttp.ClientTimeout(total=self.timeout),
                 ) as resp:
+                    if resp.status >= 500:
+                        text = await resp.text()
+                        self._record_error("chat", f"HTTP {resp.status}: {text[:200]}")
+                        raise RuntimeError(f"Server error HTTP {resp.status}")
                     if resp.status != 200:
                         text = await resp.text()
                         self._record_error("chat", f"HTTP {resp.status}: {text[:200]}")
@@ -308,7 +312,7 @@ class GPTImagePlugin(Star):
             self._record_error("chat", "Could not extract image from chat response")
             return None
 
-        except asyncio.TimeoutError:
+        except (asyncio.TimeoutError, RuntimeError):
             raise
         except Exception as e:
             self._record_error("chat", str(e))
