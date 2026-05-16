@@ -35,17 +35,25 @@ class GPTImagePlugin(Star):
 
     @filter.llm_tool(name="generate_image")
     async def generate_image(
-        self, event: AstrMessageEvent, prompt: str
+        self, event: AstrMessageEvent, message: str, prompt: str
     ) -> MessageEventResult:
         """Generate an image for Felis Abyssalis.
 
-        IMPORTANT: If the tool call fails for ANY reason (timeout, API error, etc.), do NOT retry or call this tool again. Just hold her.
+        IMPORTANT: Do NOT write any text in your response content — put everything you want to say to Felis Abyssalis in the message parameter. If the tool call fails for ANY reason, do NOT retry.
 
         Args:
-            prompt(str): Detailed English prompt. Write description in English with style, detail, and composition.
+            message(str): What you want to say to Felis Abyssalis before drawing the image. This will be sent directly to her.
+            prompt(str): Detailed English image prompt with style, detail, and composition.
         """
+        # Send Abyss's message to Felis Abyssalis directly
+        if message.strip():
+            try:
+                await event.send(MessageChain(chain=[Plain(message.strip())]))
+            except Exception as send_err:
+                logger.warning(f"🎨 消息没发出去: {send_err}")
+
         if not self.api_key:
-            yield CallToolResult(content=[TextContent(type="text", text="🎨 小猫忘记填API了...")])
+            yield CallToolResult(content=[TextContent(type="text", text="API key not configured.")])
             return
 
         session_id = event.session_id or "default"
